@@ -159,6 +159,45 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                 name = molecule.GetProp('_Name')
                 logger.warning(f'No top level scaffold for molecule {name}')
         rdlogger.setLevel(3)  # Enable the RDKit logs
+    
+    def _multiprocess_construct(self, molecules, ring_cutoff=10, progress=False, annotate=True):
+        """Private method for multiprocessing graph construction, called by constructors.
+
+        Parameters
+        ----------
+        molecules : iterable
+            An iterable of rdkit molecules for processing
+        ring_cutoff : int, optional
+            Ignore molecules with more than the specified number of rings to avoid
+            extended processing times. The default is 10.
+        annotate : bool, optional
+            If True write an annotated murcko scaffold SMILES string to each
+            molecule edge (molecule --> scaffold). The default is True.
+        progress : bool
+            If True show a progress bar monitoring progress. The default is False
+
+        """
+        rdlogger.setLevel(4)  # Suppress the RDKit logs
+        progress = progress is False
+        desc = self.__class__.__name__
+        #TODO: init multiprocessing pool to execute fragmenter.fragment
+        #
+        # Pseudo code:
+        # ------------
+        # while:
+        #     if waiting_queue is empty:
+        #         break
+        #     scaffolds = all_nodes.query_for_fragment
+        #     scaffolds -> waiting_queue
+        #     # return itself if fragmenter.fragment cannot get new molecule(s)
+        #     waiting_queue.pop(batch_size=100) -> pool.apply_async(fragmenter.fragment(one_scaffold, ...))
+        #     results = pool.get_results()
+        #     for scaffold in results:
+        #         if scaffold not in all_nodes:
+        #             scaffold -> all_nodes
+        #             scaffold -> waiting_queue
+        
+        rdlogger.setLevel(3)  # Enable the RDKit logs
 
     @abstractmethod
     def _recursive_constructor(self, child):
