@@ -185,24 +185,10 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         rdlogger.setLevel(4)  # Suppress the RDKit logs
         progress = progress is False
         desc = self.__class__.__name__
-        #
-        # Pseudo code:
-        # ------------
-        # while:
-        #     if waiting_queue is empty:
-        #         break
-        #     scaffolds = all_nodes.query_for_fragment
-        #     scaffolds -> waiting_queue
-        #     # return itself if fragmenter.fragment cannot get new molecule(s)
-        #     waiting_queue.pop(batch_size=100) -> pool.apply_async(fragmenter.fragment(one_scaffold, ...))
-        #     results = pool.get_results()
-        #     for scaffold in results:
-        #         if scaffold not in all_nodes:
-        #             scaffold -> all_nodes
-        #             scaffold -> waiting_queue
 
         # Build waiting queue and add all input molecules into graph
         waiting_queue = []
+        availabe_molecules = []
         for molecule in molecules:
             # init molecule names if the original one does not have a name
             init_molecule_name(molecule)
@@ -213,12 +199,14 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                 continue
             # remove molecue with stereo chemistry
             rdmolops.RemoveStereochemistry(molecule)
+            availabe_molecules.append(molecule)
             
         pool = Pool(cores)
-        scaffold_rdmols = pool.map(get_murcko_scaffold, molecules)
+        scaffold_rdmols = pool.map(get_murcko_scaffold, availabe_molecules)
 
-        for scaffold_rdmol in scaffold_rdmols:
+        for i, scaffold_rdmol in enumerate(scaffold_rdmols):
             scaffold = Scaffold(scaffold_rdmol)
+            molecule = availabe_molecules[i]
             if scaffold:
                 annotation = None
                 if annotate:
@@ -231,7 +219,7 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                     # add available searching scaffolds into the waiting_queue
                     waiting_queue.append(scaffold_rdmol)
             else:
-                name = molecule.GetProp('_Name')
+                name = scaffold_rdmol.GetProp('_Name')
                 logger.warning(f'No top level scaffold for molecule {name}')
         
         self._multiprocess_constructor(waiting_queue, cores=cores, max_graph_layers_tries=max_graph_layers_tries)
