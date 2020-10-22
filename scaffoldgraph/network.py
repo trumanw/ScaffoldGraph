@@ -2,6 +2,7 @@
 scaffoldgraph.network
 """
 from multiprocessing import Pool
+from itertools import chain
 
 from loguru import logger
 from rdkit.Chem import MolFromSmiles
@@ -9,6 +10,7 @@ from rdkit.Chem import MolFromSmiles
 from .core import MurckoRingFragmenter, MurckoRingSystemFragmenter
 from .core import ScaffoldGraph
 from .core import Scaffold
+from .core import batch_get_scaffold_fragments
 
 class ScaffoldNetwork(ScaffoldGraph):
     """
@@ -193,15 +195,33 @@ class HierS(ScaffoldGraph):
                     self._recursive_constructor(parent)
 
     def _multiprocess_constructor(self, waiting_queue, cores=4, max_graph_layers_tries=1000):
+        i = 0
         for i in range(max_graph_layers_tries):
             if 0 == len(waiting_queue):
                 # terminate the loop if no more 
                 # scaffolds/molecules are waited to be fragmented
                 break
-
-            pool = Pool(cores)
-            potential_scaffolds_pairs = pool.map(fragment, waiting_queue)
             
+            potential_scaffolds_pairs = []
+            if len(waiting_queue) > cores:
+                batch_size = int(len(waiting_queue) / cores)
+                batch_num = cores if len(waiting_queue) % cores == 0 else (cores + 1)
+
+                pool = Pool(cores)
+                result_objs = []
+
+                for batch_index in range(batch_num):
+                    result_objs.append(
+                        pool.apply_async(
+                            batch_get_scaffold_fragments, 
+                            (waiting_queue[batch_index * batch_size:(batch_index+1) * batch_size], )
+                        )
+                    )
+                batch_potential_scaffolds_pairs = [result.get() for result in result_objs]
+                potential_scaffolds_pairs = list(chain(*batch_potential_scaffolds_pairs))
+            else:   # no need to be multiprocessing if waiting_queue molecules are less than cores.
+                potential_scaffolds_pairs = batch_get_scaffold_fragments(waiting_queue)
+                
             waiting_queue = []
             for child, parents in potential_scaffolds_pairs:
                 child_scaffold = Scaffold(MolFromSmiles(child))
@@ -219,9 +239,9 @@ class HierS(ScaffoldGraph):
         if i == max_graph_layers_tries:
             logger.warning(f'Loop of iteratively building graph has exceeded the maximum limitation {i}')
 
-def fragment(scaffold_rdmol):
-    import scaffoldgraph as sg
-    fragmenter = sg.HierS().fragmenter
-    scaffold_obj = Scaffold(scaffold_rdmol)
-    fragments = fragmenter.fragment(scaffold_obj)
-    return scaffold_obj.get_canonical_identifier(), [f.get_canonical_identifier() for f in fragments]
+# def fragment(scaffold_rdmol):
+#     import scaffoldgraph as sg
+#     fragmenter = sg.HierS().fragmenter
+#     scaffold_obj = Scaffold(scaffold_rdmol)
+#     fragments = fragmenter.fragment(scaffold_obj)
+#     return scaffold_obj.get_canonical_identifier(), [f.get_canonical_identifier() for f in fragments]

@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 
 from multiprocessing import Pool
+from itertools import chain
 import networkx as nx
 import gzip
 
@@ -20,7 +21,7 @@ from rdkit.Chem.rdMolDescriptors import CalcNumRings
 
 from scaffoldgraph.io import *
 from scaffoldgraph.utils import canonize_smiles
-from .fragment import get_murcko_scaffold, get_annotated_murcko_scaffold
+from .fragment import get_murcko_scaffold, get_annotated_murcko_scaffold, batch_get_murcko_scaffold
 from .scaffold import Scaffold
 
 rdlogger = RDLogger.logger()
@@ -200,18 +201,35 @@ class ScaffoldGraph(nx.DiGraph, ABC):
             # remove molecue with stereo chemistry
             rdmolops.RemoveStereochemistry(molecule)
             availabe_molecules.append(molecule)
-            
-        pool = Pool(cores)
-        scaffold_rdmols = pool.map(get_murcko_scaffold, availabe_molecules)
 
-        for i, scaffold_rdmol in enumerate(scaffold_rdmols):
+        # split the available_molecules into several parallel batch processing groups
+        scaffold_rdmols = []
+        if len(availabe_molecules) > cores:
+            batch_size = int(len(availabe_molecules) / cores)
+            batch_num = cores if len(availabe_molecules) % cores == 0 else (cores+1)
+
+            pool = Pool(cores)
+            result_objs = []
+            for batch_index in range(batch_num):
+                result_objs.append(
+                    pool.apply_async(
+                        batch_get_murcko_scaffold, 
+                        (availabe_molecules[batch_index * batch_size:(batch_index+1) * batch_size], )
+                    )
+                )
+            batch_scaffold_rdmols = [result.get() for result in result_objs]
+            scaffold_rdmols = list(chain(*batch_scaffold_rdmols))
+        else:   # no need to be multiprocessing if availabe_molecules are less than cores.
+            scaffold_rdmols = batch_get_murcko_scaffold(availabe_molecules)
+
+        # start to build scaffold graph...
+        for scaffold_rdmol, molecule in zip(scaffold_rdmols, availabe_molecules):
             scaffold = Scaffold(scaffold_rdmol)
-            molecule = availabe_molecules[i]
             if scaffold:
                 annotation = None
                 if annotate:
                     annotation = get_annotated_murcko_scaffold(molecule, scaffold.mol, False)
-                #TODO: change scaffold_builder to self in real code
+
                 self.add_scaffold_node(scaffold)
                 self.add_molecule_node(molecule)
                 self.add_molecule_edge(molecule, scaffold, annotation=annotation)
