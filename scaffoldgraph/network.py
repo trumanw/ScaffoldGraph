@@ -1,10 +1,14 @@
 """
 scaffoldgraph.network
 """
+from multiprocessing import Pool
+
+from loguru import logger
+from rdkit.Chem import MolFromSmiles
 
 from .core import MurckoRingFragmenter, MurckoRingSystemFragmenter
 from .core import ScaffoldGraph
-
+from .core import Scaffold
 
 class ScaffoldNetwork(ScaffoldGraph):
     """
@@ -187,3 +191,37 @@ class HierS(ScaffoldGraph):
                 self.add_scaffold_edge(parent, child)
                 if parent.ring_systems.count > 1:
                     self._recursive_constructor(parent)
+
+    def _multiprocess_constructor(self, waiting_queue, cores=4, max_graph_layers_tries=1000):
+        for i in range(max_graph_layers_tries):
+            if 0 == len(waiting_queue):
+                # terminate the loop if no more 
+                # scaffolds/molecules are waited to be fragmented
+                break
+
+            pool = Pool(cores)
+            potential_scaffolds_pairs = pool.map(fragment, waiting_queue)
+            
+            waiting_queue = []
+            for child, parents in potential_scaffolds_pairs:
+                child_scaffold = Scaffold(MolFromSmiles(child))
+                
+                for parent_smi in parents:
+                    parent_scaffold = Scaffold(MolFromSmiles(parent_smi))
+                    if parent_scaffold in self.nodes:
+                        self.add_scaffold_edge(parent_scaffold, child_scaffold)
+                    else:
+                        self.add_scaffold_node(parent_scaffold)
+                        self.add_scaffold_edge(parent_scaffold, child_scaffold)
+                        if parent_scaffold.ring_systems.count > 1:
+                            waiting_queue.append(parent_scaffold.mol)
+        
+        if i == max_graph_layers_tries:
+            logger.warning(f'Loop of iteratively building graph has exceeded the maximum limitation {i}')
+
+def fragment(scaffold_rdmol):
+    import scaffoldgraph as sg
+    fragmenter = sg.HierS().fragmenter
+    scaffold_obj = Scaffold(scaffold_rdmol)
+    fragments = fragmenter.fragment(scaffold_obj)
+    return scaffold_obj.get_canonical_identifier(), [f.get_canonical_identifier() for f in fragments]

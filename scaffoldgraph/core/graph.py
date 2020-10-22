@@ -7,6 +7,7 @@ Defines the base class for scaffold graphs in ScaffoldGraph
 from abc import ABC, abstractmethod
 from collections import Counter
 
+from multiprocessing import Pool
 import networkx as nx
 import gzip
 
@@ -160,7 +161,7 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                 logger.warning(f'No top level scaffold for molecule {name}')
         rdlogger.setLevel(3)  # Enable the RDKit logs
     
-    def _multiprocess_construct(self, molecules, ring_cutoff=10, progress=False, annotate=True):
+    def _multiprocess_construct(self, molecules, ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000):
         """Private method for multiprocessing graph construction, called by constructors.
 
         Parameters
@@ -175,12 +176,15 @@ class ScaffoldGraph(nx.DiGraph, ABC):
             molecule edge (molecule --> scaffold). The default is True.
         progress : bool
             If True show a progress bar monitoring progress. The default is False
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
 
         """
         rdlogger.setLevel(4)  # Suppress the RDKit logs
         progress = progress is False
         desc = self.__class__.__name__
-        #TODO: init multiprocessing pool to execute fragmenter.fragment
         #
         # Pseudo code:
         # ------------
@@ -196,6 +200,41 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         #         if scaffold not in all_nodes:
         #             scaffold -> all_nodes
         #             scaffold -> waiting_queue
+
+        # Build waiting queue and add all input molecules into graph
+        waiting_queue = []
+        for molecule in molecules:
+            # init molecule names if the original one does not have a name
+            init_molecule_name(molecule)
+            # filter out molecule with rings more than ring_cutoff threshold
+            if CalcNumRings(molecule) > ring_cutoff:
+                name = molecule.GetProp('_Name')
+                logger.warning(f'Molecule {name} filtered (> {ring_cutoff} rings)')
+                continue
+            # remove molecue with stereo chemistry
+            rdmolops.RemoveStereochemistry(molecule)
+            
+        pool = Pool(cores)
+        scaffold_rdmols = pool.map(get_murcko_scaffold, molecules)
+
+        for scaffold_rdmol in scaffold_rdmols:
+            scaffold = Scaffold(scaffold_rdmol)
+            if scaffold:
+                annotation = None
+                if annotate:
+                    annotation = get_annotated_murcko_scaffold(molecule, scaffold.mol, False)
+                #TODO: change scaffold_builder to self in real code
+                self.add_scaffold_node(scaffold)
+                self.add_molecule_node(molecule)
+                self.add_molecule_edge(molecule, scaffold, annotation=annotation)
+                if scaffold.rings.count > 1:
+                    # add available searching scaffolds into the waiting_queue
+                    waiting_queue.append(scaffold_rdmol)
+            else:
+                name = molecule.GetProp('_Name')
+                logger.warning(f'No top level scaffold for molecule {name}')
+        
+        self._multiprocess_constructor(waiting_queue, cores=cores, max_graph_layers_tries=max_graph_layers_tries)
         
         rdlogger.setLevel(3)  # Enable the RDKit logs
 
@@ -804,6 +843,47 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         supplier = read_dataframe(df, smiles_column, name_column, data_columns)
         instance = cls(**kwargs)
         instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        return instance
+    
+    @classmethod
+    def from_dataframe_parallel(cls, df, smiles_column='Smiles', name_column='Name', data_columns=None,
+                       ring_cutoff=10, progress=False, annotate=True, cores=4, max_graph_layers_tries=1000, **kwargs):
+        """Construct a ScaffoldGraph from a pandas DataFrame.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            A pandas DataFrame containing SMILES strings and a molecule identifier.
+        smiles_column : value, optional
+            Label of column containing SMILES strings. The default is 'Smiles'.
+        name_column : str
+            Label of column containing SMILES strings. The default is 'Name'.
+        data_columns : list
+            List of column keys to be included in the molecule node attributes.
+        ring_cutoff : int, optional
+            Ignore molecules with more rings than this cutoff. The default is 10.
+        progress : bool, optional
+            If True display a progress bar to monitor construction progress.
+            The default is False.
+        annotate : bool, optional
+            If True write an annotated murcko scaffold SMILES string to each
+            molecule edge (molecule --> scaffold). The default is True.
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
+        **kwargs : keyword arguments, optional
+            Arguments to pass to the ScaffoldGraph initilaizer.
+
+        """
+        supplier = read_dataframe(df, smiles_column, name_column, data_columns)
+        instance = cls(**kwargs)
+        isntance._multiprocess_construct(supplier, 
+                    ring_cutoff=ring_cutoff, 
+                    progress=progress, 
+                    annotate=annotate,
+                    cores=cores,
+                    max_graph_layers_tries=max_graph_layers_tries)
         return instance
 
     def __repr__(self):
