@@ -878,7 +878,7 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         """
         supplier = read_dataframe(df, smiles_column, name_column, data_columns)
         instance = cls(**kwargs)
-        isntance._multiprocess_construct(supplier, 
+        instance._multiprocess_construct(supplier, 
                     ring_cutoff=ring_cutoff, 
                     progress=progress, 
                     annotate=annotate,
