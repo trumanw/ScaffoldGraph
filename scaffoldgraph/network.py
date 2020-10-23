@@ -196,6 +196,7 @@ class HierS(ScaffoldGraph):
 
     def _multiprocess_constructor(self, waiting_queue, cores=4, max_graph_layers_tries=1000):
         i = 0
+        pool = Pool(cores)
         for i in range(max_graph_layers_tries):
             if 0 == len(waiting_queue):
                 # terminate the loop if no more 
@@ -207,7 +208,6 @@ class HierS(ScaffoldGraph):
                 batch_size = int(len(waiting_queue) / cores)
                 batch_num = cores if len(waiting_queue) % cores == 0 else (cores + 1)
 
-                pool = Pool(cores)
                 result_objs = []
 
                 for batch_index in range(batch_num):
@@ -238,6 +238,9 @@ class HierS(ScaffoldGraph):
 
             # transfer smiles to rdmol and add to the waiting_queue
             waiting_queue = [MolFromSmiles(smi) for smi in waiting_queue_in_smiles]
+        
+        pool.close()
+        pool.join()
         
         if i == max_graph_layers_tries:
             logger.warning(f'Loop of iteratively building graph has exceeded the maximum limitation {i}')

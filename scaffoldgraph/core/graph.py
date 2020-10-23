@@ -233,6 +233,9 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                     (availabe_molecules[batch_index * batch_size:(batch_index+1) * batch_size], ring_cutoff, annotate, )
                 )
             )
+        pool.close()
+        pool.join()
+        
         batch_scaffold_rdmols = [result.get() for result in result_objs]
         waiting_queue = list(chain(*batch_scaffold_rdmols))
 
