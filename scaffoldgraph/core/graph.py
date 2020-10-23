@@ -161,7 +161,40 @@ class ScaffoldGraph(nx.DiGraph, ABC):
                 name = molecule.GetProp('_Name')
                 logger.warning(f'No top level scaffold for molecule {name}')
         rdlogger.setLevel(3)  # Enable the RDKit logs
-    
+
+    def _subprocess_v2_construct_preparation(self, sub_molecules, ring_cutoff=10, annotate=True):
+        waiting_queue = []
+
+        for molecule in sub_molecules:
+            # init molecule names if the original one does not have a name
+            init_molecule_name(molecule)
+            # filter out molecule with rings more than ring_cutoff threshold
+            if CalcNumRings(molecule) > ring_cutoff:
+                name = molecule.GetProp('_Name')
+                logger.warning(f'Molecule {name} filtered (> {ring_cutoff} rings)')
+            # remove molecue with stereo chemistry
+            rdmolops.RemoveStereochemistry(molecule)
+            
+            scaffold_rdmol = get_murcko_scaffold(molecule)
+            scaffold = Scaffold(scaffold_rdmol)
+            if scaffold:
+                annotation = None
+                if annotate:
+                    annotation = get_annotated_murcko_scaffold(molecule, scaffold.mol, False)
+                
+                #TODO: same scaffold might be added multiple times in different processes.
+                self.add_scaffold_node(scaffold)
+                self.add_molecule_node(molecule)
+                self.add_molecule_edge(molecule, scaffold, annotation=annotation)
+                if scaffold.rings.count > 1:
+                    # add available searching scaffolds into the waiting_queue
+                    waiting_queue.append(scaffold_rdmol)
+            else:
+                name = scaffold_rdmol.GetProp('_Name')
+                logger.warning(f'No top level scaffold for molecule {name}')
+        
+        return waiting_queue
+        
     def _multiprocess_construct(self, molecules, ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000):
         """Private method for multiprocessing graph construction, called by constructors.
 
@@ -188,58 +221,21 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         desc = self.__class__.__name__
 
         # Build waiting queue and add all input molecules into graph
-        waiting_queue = []
-        availabe_molecules = []
-        for molecule in molecules:
-            # init molecule names if the original one does not have a name
-            init_molecule_name(molecule)
-            # filter out molecule with rings more than ring_cutoff threshold
-            if CalcNumRings(molecule) > ring_cutoff:
-                name = molecule.GetProp('_Name')
-                logger.warning(f'Molecule {name} filtered (> {ring_cutoff} rings)')
-                continue
-            # remove molecue with stereo chemistry
-            rdmolops.RemoveStereochemistry(molecule)
-            availabe_molecules.append(molecule)
-
-        # split the available_molecules into several parallel batch processing groups
-        scaffold_rdmols = []
-        if len(availabe_molecules) > cores:
-            batch_size = int(len(availabe_molecules) / cores)
-            batch_num = cores if len(availabe_molecules) % cores == 0 else (cores+1)
-
-            pool = Pool(cores)
-            result_objs = []
-            for batch_index in range(batch_num):
-                result_objs.append(
-                    pool.apply_async(
-                        batch_get_murcko_scaffold, 
-                        (availabe_molecules[batch_index * batch_size:(batch_index+1) * batch_size], )
-                    )
+        availabe_molecules = [mol for mol in molecules]
+        batch_size = int(len(availabe_molecules) / cores)
+        batch_name = cores if len(availabe_molecules) % cores == 0 else (cores + 1)
+        pool = Pool(cores)
+        result_objs = []
+        for batch_index in range(batch_name):
+            result_objs.append(
+                pool.apply_async(
+                    self._subprocess_v2_construct_preparation,
+                    (availabe_molecules[batch_index * batch_size:(batch_index+1) * batch_size], ring_cutoff, annotate, )
                 )
-            batch_scaffold_rdmols = [result.get() for result in result_objs]
-            scaffold_rdmols = list(chain(*batch_scaffold_rdmols))
-        else:   # no need to be multiprocessing if availabe_molecules are less than cores.
-            scaffold_rdmols = batch_get_murcko_scaffold(availabe_molecules)
+            )
+        batch_scaffold_rdmols = [result.get() for result in result_objs]
+        waiting_queue = list(chain(*batch_scaffold_rdmols))
 
-        # start to build scaffold graph...
-        for scaffold_rdmol, molecule in zip(scaffold_rdmols, availabe_molecules):
-            scaffold = Scaffold(scaffold_rdmol)
-            if scaffold:
-                annotation = None
-                if annotate:
-                    annotation = get_annotated_murcko_scaffold(molecule, scaffold.mol, False)
-
-                self.add_scaffold_node(scaffold)
-                self.add_molecule_node(molecule)
-                self.add_molecule_edge(molecule, scaffold, annotation=annotation)
-                if scaffold.rings.count > 1:
-                    # add available searching scaffolds into the waiting_queue
-                    waiting_queue.append(scaffold_rdmol)
-            else:
-                name = scaffold_rdmol.GetProp('_Name')
-                logger.warning(f'No top level scaffold for molecule {name}')
-        
         self._multiprocess_constructor(waiting_queue, cores=cores, max_graph_layers_tries=max_graph_layers_tries)
         
         rdlogger.setLevel(3)  # Enable the RDKit logs
