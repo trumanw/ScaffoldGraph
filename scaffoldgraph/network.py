@@ -197,6 +197,9 @@ class HierS(ScaffoldGraph):
     def _multiprocess_constructor(self, waiting_queue, cores=4, max_graph_layers_tries=1000):
         i = 0
         pool = Pool(cores)
+        # cache from smiles to scaffolds which can save the time of SMILES conversion
+        child_smiles_to_scaffolds = dict()
+        parent_smiles_to_scaffolds = dict()
         for i in range(max_graph_layers_tries):
             if 0 == len(waiting_queue):
                 # terminate the loop if no more 
@@ -224,15 +227,24 @@ class HierS(ScaffoldGraph):
                 
             waiting_queue_in_smiles = []
             for child, parents in potential_scaffolds_pairs:
-                child_scaffold = Scaffold(MolFromSmiles(child))
+                if child in child_smiles_to_scaffolds:
+                    child_scaffold = child_smiles_to_scaffolds[child]
+                else:
+                    child_scaffold = Scaffold(MolFromSmiles(child))
+                    child_smiles_to_scaffolds[child] = child_scaffold
                 
                 for parent_smi in parents:
-                    parent_scaffold = Scaffold(MolFromSmiles(parent_smi))
-                    if parent_scaffold in self.nodes:
-                        self.add_scaffold_edge(parent_scaffold, child_scaffold)
+                    if parent_smi in parent_smiles_to_scaffolds:
+                        parent_scaffold = parent_smiles_to_scaffolds[parent_smi]
                     else:
-                        self.add_scaffold_node(parent_scaffold)
-                        self.add_scaffold_edge(parent_scaffold, child_scaffold)
+                        parent_scaffold = Scaffold(MolFromSmiles(parent_smi))
+                        parent_smiles_to_scaffolds[parent_smi] = parent_scaffold
+
+                    if parent_scaffold in self.nodes:
+                        self.add_scaffold_edge_in_smiles(parent_scaffold, child_scaffold)
+                    else:
+                        self.add_scaffold_node_in_smiles(parent_scaffold, parent_scaffold.rings.count)
+                        self.add_scaffold_edge_in_smiles(parent_scaffold, child_scaffold)
                         if parent_scaffold.ring_systems.count > 1:
                             waiting_queue_in_smiles.append(parent_smi)
 

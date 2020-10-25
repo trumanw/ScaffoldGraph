@@ -240,7 +240,7 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         waiting_queue = list(chain(*batch_scaffold_rdmols))
 
         self._multiprocess_constructor(waiting_queue, cores=cores, max_graph_layers_tries=max_graph_layers_tries)
-        
+
         rdlogger.setLevel(3)  # Enable the RDKit logs
 
     @abstractmethod
@@ -674,6 +674,23 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         default_attr.update(attr)
         self.add_node(scaffold.get_canonical_identifier(), **default_attr)
 
+    def add_scaffold_node_in_smiles(self, scaffold_smiles, rings_count, **attr):
+        """Add a scaffold node to the graph with smiles and rings count.
+
+        Parameters
+        ----------
+        scaffold_smiles : str
+            Scaffold to add to the graph in SMILES.
+        rings_count : int
+            Returned by scaffold.rings.count.
+        **attr : keyword arguments, optional
+            Attributes to add to the node.
+
+        """
+        default_attr = dict(type='scaffold', hierarchy=rings_count)
+        default_attr.update(attr)
+        self.add_node(scaffold_smiles, **default_attr)
+
     def add_molecule_edge(self, molecule, scaffold, **attr):
         """Add a scaffold -> molecule edge.
 
@@ -712,6 +729,26 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         self.add_edge(
             parent.get_canonical_identifier(),
             child.get_canonical_identifier(),
+            **default_attr
+        )
+    
+    def add_scaffold_edge_in_smiles(self, parent_smiles, child_smiles, **attr):
+        """Add a scaffold (parent) -> scaffold (child) edge in SMILES
+
+        Parameters
+        ----------
+        parent_smiles : str
+            Molecule to connect with scaffold in SMILES
+        child_smiles : str
+            Scaffold to connect with molecule in SMILES
+        **attr : keyward arguments, optional
+            Attributes to add to the edge
+        """
+        default_attr = dict(type=1)
+        default_attr.update(attr)
+        self.add_edge(
+            parent_smiles,
+            child_smiles,
             **default_attr
         )
 
