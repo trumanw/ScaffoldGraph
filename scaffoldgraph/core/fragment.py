@@ -418,6 +418,16 @@ def partial_sanitization(mol):
         SANITIZE_FINDRADICALS
     )
 
+def get_scaffold_fragments(scaffold_rdmol):
+    # import scaffoldgraph as sg
+    # fragmenter = sg.HierS().fragmenter
+    fragmenter = MurckoRingSystemFragmenter()
+    scaffold_obj = Scaffold(scaffold_rdmol)
+    fragments = fragmenter.fragment(scaffold_obj)
+    return scaffold_obj.get_canonical_identifier(), [f.get_canonical_identifier() for f in fragments]
+
+def batch_get_scaffold_fragments(scaffold_rdmols):
+    return [get_scaffold_fragments(mol) for mol in scaffold_rdmols]
 
 def get_murcko_scaffold(mol, generic=False):
     """Get the murcko scaffold for an input molecule.
@@ -438,6 +448,23 @@ def get_murcko_scaffold(mol, generic=False):
     if generic:
         murcko = MurckoScaffold.MakeScaffoldGeneric(murcko)
     return murcko
+
+def batch_get_murcko_scaffold(mols, generic=False):
+    """Batch get the murcko scaffold for multiple input molecules.
+
+    Parameters
+    ----------
+    mol : rdkit.rdchem.Chem.Mol
+    generic : bool
+        If True return a generic scaffold (CSK)
+
+    Returns
+    -------
+    murcko : list[rdkit.Chem.rdchem.Mol]
+        List of Murcko scaffolds.
+
+    """
+    return [get_murcko_scaffold(mol, generic=generic) for mol in mols]
 
 
 def get_annotated_murcko_scaffold(mol, scaffold=None, as_mol=True):

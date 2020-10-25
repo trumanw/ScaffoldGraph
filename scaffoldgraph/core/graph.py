@@ -7,6 +7,8 @@ Defines the base class for scaffold graphs in ScaffoldGraph
 from abc import ABC, abstractmethod
 from collections import Counter
 
+from multiprocessing import Pool
+from itertools import chain
 import networkx as nx
 import gzip
 
@@ -19,7 +21,7 @@ from rdkit.Chem.rdMolDescriptors import CalcNumRings
 
 from scaffoldgraph.io import *
 from scaffoldgraph.utils import canonize_smiles
-from .fragment import get_murcko_scaffold, get_annotated_murcko_scaffold
+from .fragment import get_murcko_scaffold, get_annotated_murcko_scaffold, batch_get_murcko_scaffold
 from .scaffold import Scaffold
 
 rdlogger = RDLogger.logger()
@@ -158,6 +160,87 @@ class ScaffoldGraph(nx.DiGraph, ABC):
             else:
                 name = molecule.GetProp('_Name')
                 logger.warning(f'No top level scaffold for molecule {name}')
+        rdlogger.setLevel(3)  # Enable the RDKit logs
+
+    def _subprocess_v2_construct_preparation(self, sub_molecules, ring_cutoff=10, annotate=True):
+        waiting_queue = []
+
+        for molecule in sub_molecules:
+            # init molecule names if the original one does not have a name
+            init_molecule_name(molecule)
+            # filter out molecule with rings more than ring_cutoff threshold
+            if CalcNumRings(molecule) > ring_cutoff:
+                name = molecule.GetProp('_Name')
+                logger.warning(f'Molecule {name} filtered (> {ring_cutoff} rings)')
+            # remove molecue with stereo chemistry
+            rdmolops.RemoveStereochemistry(molecule)
+            
+            scaffold_rdmol = get_murcko_scaffold(molecule)
+            scaffold = Scaffold(scaffold_rdmol)
+            if scaffold:
+                annotation = None
+                if annotate:
+                    annotation = get_annotated_murcko_scaffold(molecule, scaffold.mol, False)
+                
+                #TODO: same scaffold might be added multiple times in different processes.
+                self.add_scaffold_node(scaffold)
+                self.add_molecule_node(molecule)
+                self.add_molecule_edge(molecule, scaffold, annotation=annotation)
+                if scaffold.rings.count > 1:
+                    # add available searching scaffolds into the waiting_queue
+                    waiting_queue.append(scaffold_rdmol)
+            else:
+                name = scaffold_rdmol.GetProp('_Name')
+                logger.warning(f'No top level scaffold for molecule {name}')
+        
+        return waiting_queue
+        
+    def _multiprocess_construct(self, molecules, ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000):
+        """Private method for multiprocessing graph construction, called by constructors.
+
+        Parameters
+        ----------
+        molecules : iterable
+            An iterable of rdkit molecules for processing
+        ring_cutoff : int, optional
+            Ignore molecules with more than the specified number of rings to avoid
+            extended processing times. The default is 10.
+        annotate : bool, optional
+            If True write an annotated murcko scaffold SMILES string to each
+            molecule edge (molecule --> scaffold). The default is True.
+        progress : bool
+            If True show a progress bar monitoring progress. The default is False
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
+
+        """
+        rdlogger.setLevel(4)  # Suppress the RDKit logs
+        progress = progress is False
+        desc = self.__class__.__name__
+
+        # Build waiting queue and add all input molecules into graph
+        availabe_molecules = [mol for mol in molecules]
+        batch_size = int(len(availabe_molecules) / cores)
+        batch_name = cores if len(availabe_molecules) % cores == 0 else (cores + 1)
+        pool = Pool(cores)
+        result_objs = []
+        for batch_index in range(batch_name):
+            result_objs.append(
+                pool.apply_async(
+                    self._subprocess_v2_construct_preparation,
+                    (availabe_molecules[batch_index * batch_size:(batch_index+1) * batch_size], ring_cutoff, annotate, )
+                )
+            )
+        pool.close()
+        pool.join()
+        
+        batch_scaffold_rdmols = [result.get() for result in result_objs]
+        waiting_queue = list(chain(*batch_scaffold_rdmols))
+
+        self._multiprocess_constructor(waiting_queue, cores=cores, max_graph_layers_tries=max_graph_layers_tries)
+
         rdlogger.setLevel(3)  # Enable the RDKit logs
 
     @abstractmethod
@@ -591,6 +674,23 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         default_attr.update(attr)
         self.add_node(scaffold.get_canonical_identifier(), **default_attr)
 
+    def add_scaffold_node_in_smiles(self, scaffold_smiles, rings_count, **attr):
+        """Add a scaffold node to the graph with smiles and rings count.
+
+        Parameters
+        ----------
+        scaffold_smiles : str
+            Scaffold to add to the graph in SMILES.
+        rings_count : int
+            Returned by scaffold.rings.count.
+        **attr : keyword arguments, optional
+            Attributes to add to the node.
+
+        """
+        default_attr = dict(type='scaffold', hierarchy=rings_count)
+        default_attr.update(attr)
+        self.add_node(scaffold_smiles, **default_attr)
+
     def add_molecule_edge(self, molecule, scaffold, **attr):
         """Add a scaffold -> molecule edge.
 
@@ -629,6 +729,26 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         self.add_edge(
             parent.get_canonical_identifier(),
             child.get_canonical_identifier(),
+            **default_attr
+        )
+    
+    def add_scaffold_edge_in_smiles(self, parent_smiles, child_smiles, **attr):
+        """Add a scaffold (parent) -> scaffold (child) edge in SMILES
+
+        Parameters
+        ----------
+        parent_smiles : str
+            Molecule to connect with scaffold in SMILES
+        child_smiles : str
+            Scaffold to connect with molecule in SMILES
+        **attr : keyward arguments, optional
+            Attributes to add to the edge
+        """
+        default_attr = dict(type=1)
+        default_attr.update(attr)
+        self.add_edge(
+            parent_smiles,
+            child_smiles,
             **default_attr
         )
 
@@ -765,6 +885,47 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         supplier = read_dataframe(df, smiles_column, name_column, data_columns)
         instance = cls(**kwargs)
         instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        return instance
+    
+    @classmethod
+    def from_dataframe_parallel(cls, df, smiles_column='Smiles', name_column='Name', data_columns=None,
+                       ring_cutoff=10, progress=False, annotate=True, cores=4, max_graph_layers_tries=1000, **kwargs):
+        """Construct a ScaffoldGraph from a pandas DataFrame.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            A pandas DataFrame containing SMILES strings and a molecule identifier.
+        smiles_column : value, optional
+            Label of column containing SMILES strings. The default is 'Smiles'.
+        name_column : str
+            Label of column containing SMILES strings. The default is 'Name'.
+        data_columns : list
+            List of column keys to be included in the molecule node attributes.
+        ring_cutoff : int, optional
+            Ignore molecules with more rings than this cutoff. The default is 10.
+        progress : bool, optional
+            If True display a progress bar to monitor construction progress.
+            The default is False.
+        annotate : bool, optional
+            If True write an annotated murcko scaffold SMILES string to each
+            molecule edge (molecule --> scaffold). The default is True.
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
+        **kwargs : keyword arguments, optional
+            Arguments to pass to the ScaffoldGraph initilaizer.
+
+        """
+        supplier = read_dataframe(df, smiles_column, name_column, data_columns)
+        instance = cls(**kwargs)
+        instance._multiprocess_construct(supplier, 
+                    ring_cutoff=ring_cutoff, 
+                    progress=progress, 
+                    annotate=annotate,
+                    cores=cores,
+                    max_graph_layers_tries=max_graph_layers_tries)
         return instance
 
     def __repr__(self):
