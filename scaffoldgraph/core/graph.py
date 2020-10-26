@@ -753,7 +753,7 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         )
 
     @classmethod
-    def from_sdf(cls, file_name, ring_cutoff=10, progress=False, annotate=True, zipped=False, **kwargs):
+    def from_sdf(cls, file_name, ring_cutoff=10, progress=False, annotate=True, zipped=False, cores=1, max_graph_layers_tries=1000, **kwargs):
         """Construct a ScaffoldGraph from an SDF file.
 
         Parameters
@@ -771,6 +771,10 @@ class ScaffoldGraph(nx.DiGraph, ABC):
             molecule edge (molecule --> scaffold). The default is True.
         zipped : bool, optional
             If True input file is compressed with gzip. The default is False.
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
         **kwargs : keyword arguments, optional
             Arguments to pass to the ScaffoldGraph initilaizer.
 
@@ -781,13 +785,21 @@ class ScaffoldGraph(nx.DiGraph, ABC):
             sdf = open(file_name, 'rb')
         supplier = read_sdf(sdf, requires_length=progress is True)
         instance = cls(**kwargs)
-        instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        if 1 == cores:
+            instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        else:
+            instance._multiprocess_construct(supplier, 
+                        ring_cutoff=ring_cutoff, 
+                        progress=progress, 
+                        annotate=annotate,
+                        cores=cores,
+                        max_graph_layers_tries=max_graph_layers_tries)
         sdf.close()
         return instance
 
     @classmethod
     def from_smiles_file(cls, file_name, delimiter=' ', smiles_column=0, name_column=1, header=False,
-                         ring_cutoff=10, progress=False, annotate=True, **kwargs):
+                         ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000, **kwargs):
 
         """Construct a ScaffoldGraph from a SMILES file.
 
@@ -818,11 +830,19 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         supplier = read_smiles_file(file_name, delimiter, smiles_column, name_column,
                                     header, requires_length=progress is True)
         instance = cls(**kwargs)
-        instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        if 1 == cores:
+            instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        else:
+            instance._multiprocess_construct(supplier, 
+                        ring_cutoff=ring_cutoff, 
+                        progress=progress, 
+                        annotate=annotate,
+                        cores=cores,
+                        max_graph_layers_tries=max_graph_layers_tries)
         return instance
 
     @classmethod
-    def from_supplier(cls, supplier, ring_cutoff=10, progress=False, annotate=True, **kwargs):
+    def from_supplier(cls, supplier, ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000, **kwargs):
         """Construct a ScaffoldGraph from a custom rdkit Mol supplier.
 
         A simple supplier could be a list of rdkit molecules or a supplier provided by rdkit.
@@ -841,6 +861,10 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         annotate : bool, optional
             If True write an annotated murcko scaffold SMILES string to each
             molecule edge (molecule --> scaffold). The default is True.
+        cores : int, optional
+            The total cpus used for multiprocessing of fragmentation
+        max_graph_layers_tries : int, optional
+            The maximum tries of building graph layers, The default is 100 times.
         **kwargs : keyword arguments, optional
             Arguments to pass to the ScaffoldGraph initilaizer.
 
@@ -851,45 +875,21 @@ class ScaffoldGraph(nx.DiGraph, ABC):
 
         """
         instance = cls(**kwargs)
-        instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        if 1 == cores:
+            instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        else:
+            instance._multiprocess_construct(supplier, 
+                        ring_cutoff=ring_cutoff,
+                        progress=progress,
+                        annotate=annotate,
+                        cores=cores,
+                        max_graph_layers_tries=max_graph_layers_tries)
         return instance
 
     @classmethod
     def from_dataframe(cls, df, smiles_column='Smiles', name_column='Name', data_columns=None,
-                       ring_cutoff=10, progress=False, annotate=True, **kwargs):
+                       ring_cutoff=10, progress=False, annotate=True, cores=1, max_graph_layers_tries=1000, **kwargs):
 
-        """Construct a ScaffoldGraph from a pandas DataFrame.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            A pandas DataFrame containing SMILES strings and a molecule identifier.
-        smiles_column : value, optional
-            Label of column containing SMILES strings. The default is 'Smiles'.
-        name_column : str
-            Label of column containing SMILES strings. The default is 'Name'.
-        data_columns : list
-            List of column keys to be included in the molecule node attributes.
-        ring_cutoff : int, optional
-            Ignore molecules with more rings than this cutoff. The default is 10.
-        progress : bool, optional
-            If True display a progress bar to monitor construction progress.
-            The default is False.
-        annotate : bool, optional
-            If True write an annotated murcko scaffold SMILES string to each
-            molecule edge (molecule --> scaffold). The default is True.
-        **kwargs : keyword arguments, optional
-            Arguments to pass to the ScaffoldGraph initilaizer.
-
-        """
-        supplier = read_dataframe(df, smiles_column, name_column, data_columns)
-        instance = cls(**kwargs)
-        instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
-        return instance
-    
-    @classmethod
-    def from_dataframe_parallel(cls, df, smiles_column='Smiles', name_column='Name', data_columns=None,
-                       ring_cutoff=10, progress=False, annotate=True, cores=4, max_graph_layers_tries=1000, **kwargs):
         """Construct a ScaffoldGraph from a pandas DataFrame.
 
         Parameters
@@ -920,12 +920,15 @@ class ScaffoldGraph(nx.DiGraph, ABC):
         """
         supplier = read_dataframe(df, smiles_column, name_column, data_columns)
         instance = cls(**kwargs)
-        instance._multiprocess_construct(supplier, 
-                    ring_cutoff=ring_cutoff, 
-                    progress=progress, 
-                    annotate=annotate,
-                    cores=cores,
-                    max_graph_layers_tries=max_graph_layers_tries)
+        if 1 == cores:
+            instance._construct(supplier, ring_cutoff=ring_cutoff, progress=progress, annotate=annotate)
+        else:
+            instance._multiprocess_construct(supplier, 
+                        ring_cutoff=ring_cutoff, 
+                        progress=progress, 
+                        annotate=annotate,
+                        cores=cores,
+                        max_graph_layers_tries=max_graph_layers_tries)
         return instance
 
     def __repr__(self):
