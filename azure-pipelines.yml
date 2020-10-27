@@ -26,4 +26,6 @@ jobs:
     displayName: Install Anaconda build toolkit
 
   - bash: |
+      source activate build
       conda build ./conda --output /tmp/conda-bld/noarch/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2
+    displayName: Conda build package
