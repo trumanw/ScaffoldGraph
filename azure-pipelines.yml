@@ -1,3 +1,10 @@
+variables:
+  conda_env: build
+  package_name: scaffoldgraph
+  package_ver: 1.1.5
+  package_platform: noarch
+  build_num: 0
+
 jobs:
 - job:
   displayName: ubuntu-18.04
@@ -16,17 +23,24 @@ jobs:
   - bash: echo "##vso[task.prependpath]$CONDA/bin"
     displayName: Add conda to PATH
 
-  - bash: conda create --yes --quiet --name build
+  - bash: conda create --yes --quiet --name $(conda_env)
     displayName: Create Anaconda environment
 
   - bash: |
-      source activate build
+      source activate $(conda_env)
       conda install -y conda-build anaconda-client
       conda config --set anaconda_upload no
     displayName: Install Anaconda build toolkit
 
   - bash: |
-      source activate build
+      source activate $(conda_env)
       conda build ./conda --output
       echo "### $CONDA"
     displayName: Conda build package
+
+  - bash: |
+      anaconda login --username $ANACONDA_USERNAME --password $ANACONDA_PASSWORD
+      anaconda upload \
+        $CONDA/envs/$(conda_env)/conda-bld/$(package_platform)/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2 \
+        --user xtalpi --label main
+    displayName: Conda upload package
