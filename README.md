@@ -269,6 +269,26 @@ tree = sg.ScaffoldTree.from_smiles('my_smiles_file.smi')
         
   network = sg.utils.aggregate(graphs)
   ```
+
+  **Multi-cores loading from CSV file**
+    
+    It is a alpha feature which utilize multiple cores to construct a graph.
+
+  ```python
+  import pandas as pd
+  import scaffoldgraph as sg
+
+  smiles_csv = 'input_file.csv'
+
+  df = pd.read_csv(smiles_csv)
+  sg_network = sg.HierS.from_dataframe(
+      df,
+      smiles_column='SMILES',
+      name_column='MOL_NAME',
+      progress=False,
+      cores=4
+  )
+  ```
     
 - **Creating custom scaffold prioritisation rules**
 
