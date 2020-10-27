@@ -1,0 +1,29 @@
+jobs:
+- job:
+  displayName: ubuntu-18.04
+  pool:
+    vmgImage: 'ubuntu-18.04'
+  strategy:
+    matrix:
+      Python27:
+        python.version: '2.7'
+      Python36:
+        python.version: '3.6'
+      Python37:
+        python.version: '3.7'
+  
+  steps:
+  - bash: echo "##vso[task.prependpath]$CONDA/bin"
+    displayName: Add conda to PATH
+
+  - bash: conda create --yes --quiet --name build
+    displayName: Create Anaconda environment
+
+  - bash: |
+      source activate build
+      conda install -y conda-build anaconda-client
+      conda config --set anaconda_upload no
+    displayName: Install Anaconda build toolkit
+
+  - bash: |
+      conda build ./conda --output /tmp/conda-bld/noarch/scaffoldgraph-1.1.5-py_0.tar.bz2
