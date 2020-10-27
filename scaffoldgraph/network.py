@@ -101,6 +101,68 @@ class ScaffoldNetwork(ScaffoldGraph):
                 if parent.rings.count > 1:
                     self._recursive_constructor(parent)
 
+    def _multiprocess_constructor(self, waiting_queue, cores=4, max_graph_layers_tries=1000):
+        i = 0
+        pool = Pool(cores)
+        #cache from smiles to scaffolds which can save the time of SMILES conversion
+        child_smiles_to_scaffolds = dict()
+        parent_smiles_to_scaffolds = dict()
+        for i in range(max_graph_layers_tries):
+            if 0 == len(waiting_queue):
+                # terminate the loop if no more 
+                # scaffolds/molecules are waiting for fragmentation
+                break
+
+            potential_scaffolds_pairs = []
+            if len(waiting_queue) > cores:
+                batch_size = int(len(waiting_queue) / cores)
+                batch_num = cores if len(waiting_queue) % cores == 0 else (cores + 1)
+
+                result_objs = []
+
+                for batch_index in range(batch_num):
+                    result_objs.append(
+                        pool.apply_async(
+                            batch_get_scaffold_fragments,
+                            ("MurckoRingFragmenter", waiting_queue[batch_index * batch_size:(batch_index+1) * batch_size], )
+                        )
+                    )
+                batch_potential_scaffolds_pairs = [result.get() for result in result_objs]
+                potential_scaffolds_pairs = list(chain(*batch_potential_scaffolds_pairs))
+            else:
+                potential_scaffolds_pairs = batch_get_scaffold_fragments("MurckoRingFragmenter", waiting_queue)
+
+            waiting_queue_in_smiles = []
+            for child, parents in potential_scaffolds_pairs:
+                if child in child_smiles_to_scaffolds:
+                    child_scaffold = child_smiles_to_scaffolds[child]
+                else:
+                    child_scaffold = Scaffold(MolFromSmiles(child))
+                    child_smiles_to_scaffolds[child] = child_scaffold
+                
+                for parent_smi in parents:
+                    if parent_smi in parent_smiles_to_scaffolds:
+                        parent_scaffold = parent_smiles_to_scaffolds[parent_smi]
+                    else:
+                        parent_scaffold = Scaffold(MolFromSmiles(parent_smi))
+                        parent_smiles_to_scaffolds[parent_smi] = parent_scaffold
+
+                    if parent_scaffold in self.nodes:
+                        self.add_scaffold_edge_in_smiles(parent_scaffold, child_scaffold)
+                    else:
+                        self.add_scaffold_node_in_smiles(parent_scaffold, parent_scaffold.rings.count)
+                        self.add_scaffold_edge_in_smiles(parent_scaffold, child_scaffold)
+                        if parent_scaffold.ring_systems.count > 1:
+                            waiting_queue_in_smiles.append(parent_smi)
+
+            # transfer smiles to rdmol and add to the waiting_queue
+            waiting_queue = [MolFromSmiles(smi) for smi in waiting_queue_in_smiles]
+
+        pool.close()
+        pool.join()
+
+        if i == max_graph_layers_tries:
+            logger.warning(f'Loop if iteratively building graph has exceeded the maximum limitation {i}')
 
 class HierS(ScaffoldGraph):
     """
@@ -203,7 +265,7 @@ class HierS(ScaffoldGraph):
         for i in range(max_graph_layers_tries):
             if 0 == len(waiting_queue):
                 # terminate the loop if no more 
-                # scaffolds/molecules are waited to be fragmented
+                # scaffolds/molecules are waiting for fragmentation
                 break
             
             potential_scaffolds_pairs = []
@@ -217,13 +279,13 @@ class HierS(ScaffoldGraph):
                     result_objs.append(
                         pool.apply_async(
                             batch_get_scaffold_fragments, 
-                            (waiting_queue[batch_index * batch_size:(batch_index+1) * batch_size], )
+                            ("MurckoRingSystemFragmenter", waiting_queue[batch_index * batch_size:(batch_index+1) * batch_size], )
                         )
                     )
                 batch_potential_scaffolds_pairs = [result.get() for result in result_objs]
                 potential_scaffolds_pairs = list(chain(*batch_potential_scaffolds_pairs))
             else:   # no need to be multiprocessing if waiting_queue molecules are less than cores.
-                potential_scaffolds_pairs = batch_get_scaffold_fragments(waiting_queue)
+                potential_scaffolds_pairs = batch_get_scaffold_fragments("MurckoRingSystemFragmenter", waiting_queue)
                 
             waiting_queue_in_smiles = []
             for child, parents in potential_scaffolds_pairs:

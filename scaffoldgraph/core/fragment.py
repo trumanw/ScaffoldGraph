@@ -418,16 +418,22 @@ def partial_sanitization(mol):
         SANITIZE_FINDRADICALS
     )
 
-def get_scaffold_fragments(scaffold_rdmol):
+def get_scaffold_fragments(fragmenter_type, scaffold_rdmol):
     # import scaffoldgraph as sg
     # fragmenter = sg.HierS().fragmenter
-    fragmenter = MurckoRingSystemFragmenter()
+    if fragmenter_type == 'MurckoRingSystemFragmenter':
+        fragmenter = MurckoRingSystemFragmenter()
+    elif fragmenter_type == 'MurckoRingFragmenter':
+        fragmenter = MurckoRingFragmenter()
+    else:
+        raise Exception("Undefined fragmenter type {}".format(fragmenter_type))
+    
     scaffold_obj = Scaffold(scaffold_rdmol)
     fragments = fragmenter.fragment(scaffold_obj)
     return scaffold_obj.get_canonical_identifier(), [f.get_canonical_identifier() for f in fragments]
 
-def batch_get_scaffold_fragments(scaffold_rdmols):
-    return [get_scaffold_fragments(mol) for mol in scaffold_rdmols]
+def batch_get_scaffold_fragments(fragmenter_type, scaffold_rdmols):
+    return [get_scaffold_fragments(fragmenter_type, mol) for mol in scaffold_rdmols]
 
 def get_murcko_scaffold(mol, generic=False):
     """Get the murcko scaffold for an input molecule.
