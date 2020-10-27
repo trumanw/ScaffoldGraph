@@ -1,13 +1,14 @@
 {% set name = "ScaffoldGraph" %}
-{% set version = "1.0.3" %}
+{% set version = "1.1.4" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
-  sha256: bb8577f22f92cab13a760c1087a79c7eaf543b6ea2b1fe77c7c778976d0cc333
+  # url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  # sha256: bb8577f22f92cab13a760c1087a79c7eaf543b6ea2b1fe77c7c778976d0cc333
+  path: ../
 
 build:
   noarch: python
