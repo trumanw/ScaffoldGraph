@@ -27,5 +27,5 @@ jobs:
 
   - bash: |
       source activate build
-      conda build ./conda --output /tmp/conda-bld/noarch/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2
+      conda build ./conda --output
     displayName: Conda build package
