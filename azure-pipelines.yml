@@ -28,4 +28,5 @@ jobs:
   - bash: |
       source activate build
       conda build ./conda --output
+      echo "### $CONDA"
     displayName: Conda build package
