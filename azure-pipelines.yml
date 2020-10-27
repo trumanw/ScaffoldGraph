@@ -26,4 +26,4 @@ jobs:
     displayName: Install Anaconda build toolkit
 
   - bash: |
-      conda build ./conda --output /tmp/conda-bld/noarch/scaffoldgraph-1.1.5-py_0.tar.bz2
+      conda build ./conda --output /tmp/conda-bld/noarch/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2
