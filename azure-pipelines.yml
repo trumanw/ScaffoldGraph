@@ -35,12 +35,12 @@ jobs:
   - bash: |
       source activate $(conda_env)
       conda build ./conda --output
-      echo "### $CONDA"
     displayName: Conda build package
 
   - bash: |
       source activate $(conda_env)
       anaconda login --username $ANACONDA_USERNAME --password $ANACONDA_PASSWORD
+      ls $CONDA/envs/$(conda_env)/conda-bld/$(package_platform)
       anaconda upload \
         $CONDA/envs/$(conda_env)/conda-bld/$(package_platform)/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2 \
         --user xtalpi --label main
