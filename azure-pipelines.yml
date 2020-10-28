@@ -34,7 +34,7 @@ jobs:
 
   - bash: |
       source activate $(conda_env)
-      conda build ./conda --output
+      conda build ./conda
     displayName: Conda build package
 
   - bash: |
