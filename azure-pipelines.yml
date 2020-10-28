@@ -35,7 +35,7 @@ jobs:
   - bash: |
       source activate $(conda_env)
       ls -l .
-      conda build -c conda-forge ./conda
+      conda build ./conda -c conda-forge
     displayName: Conda build package
 
   - bash: |
