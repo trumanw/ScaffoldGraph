@@ -43,13 +43,13 @@ test:
     - scaffoldgraph --help
 
 about:
-  home: https://github.com/UCLCheminformatics/ScaffoldGraph
+  home: https://github.com/trumanw/ScaffoldGraph
   license: MIT
   license_family: MIT
-  license_file: LICENSE
+  license_file: ../LICENSE
   summary: 'Cheminformatics package for building scaffold networks and trees.'
   description: |
     ScaffoldGraph is an open-source cheminformatics library, built using RDKit and NetworkX,
     for the generation and analysis of scaffold networks and scaffold trees.
-  doc_url: https://github.com/UCLCheminformatics/ScaffoldGraph
-  dev_url: https://github.com/UCLCheminformatics/ScaffoldGraph
+  doc_url: https://github.com/trumanw/ScaffoldGraph
+  dev_url: https://github.com/trumanw/ScaffoldGraph
