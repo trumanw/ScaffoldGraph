@@ -39,6 +39,7 @@ jobs:
     displayName: Conda build package
 
   - bash: |
+      source activate $(conda_env)
       anaconda login --username $ANACONDA_USERNAME --password $ANACONDA_PASSWORD
       anaconda upload \
         $CONDA/envs/$(conda_env)/conda-bld/$(package_platform)/$(package_name)-$(package_ver)-py_$(build_num).tar.bz2 \
